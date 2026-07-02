@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pallas-flash-attention"
+version = "0.1.0"
+description = "FlashAttention forward pass in JAX Pallas, benchmarked against eager JAX and XLA"
+requires-python = ">=3.10"
+dependencies = ["jax>=0.4.35"]
+
+[project.optional-dependencies]
+dev = ["pytest", "matplotlib"]
+
+[tool.setuptools]
+packages = ["flash_attention"]

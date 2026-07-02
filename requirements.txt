@@ -1,0 +1,3 @@
+jax>=0.4.35
+pytest
+matplotlib
