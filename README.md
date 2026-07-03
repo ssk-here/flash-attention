@@ -63,8 +63,12 @@ Open `notebooks/colab_runner.ipynb` in Google Colab, pick a runtime
 (**Runtime → Change runtime type**):
 
 - **CPU (free):** validates correctness via Pallas interpret mode. No compute units burned.
-- **T4 (free) / L4 (Pro):** real GPU benchmark through the Triton backend.
-- **TPU:** real TPU benchmark through the Mosaic backend.
+- **T4 (free):** correctness (interpret) plus a *real* naive-vs-XLA GPU
+  benchmark. The Pallas kernel itself can't compile here — JAX's Triton
+  backend requires Ampere (compute capability 8.0+) and the T4 is Turing
+  (7.5). The library detects this and falls back to interpret mode.
+- **L4 (Pro):** full three-way GPU benchmark through the Triton backend.
+- **TPU:** full three-way TPU benchmark through the Mosaic backend.
 
 Or locally / in a terminal:
 

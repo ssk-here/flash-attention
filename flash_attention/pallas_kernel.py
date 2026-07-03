@@ -13,10 +13,35 @@ TPU vector units want 2-D shapes.
 
 import functools
 import math
+import warnings
 
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
+
+
+def _default_interpret() -> bool:
+    """Interpret mode when the backend can't compile the kernel.
+
+    CPU has no Pallas compiler; on GPU, the Triton backend requires Ampere
+    (compute capability 8.0) or newer -- Colab's free T4 is Turing (7.5) and
+    can only validate correctness via interpret mode. TPU always compiles
+    (Mosaic backend).
+    """
+    backend = jax.default_backend()
+    if backend == "cpu":
+        return True
+    if backend == "gpu":
+        cc = getattr(jax.devices()[0], "compute_capability", None)
+        if cc is not None and float(cc) < 8.0:
+            warnings.warn(
+                f"GPU compute capability {cc} < 8.0: Pallas' Triton backend "
+                "cannot compile here (needs Ampere+). Falling back to "
+                "interpret mode -- correct but slow; timings are meaningless.",
+                stacklevel=3,
+            )
+            return True
+    return False
 
 
 def _flash_attention_kernel(q_ref, k_ref, v_ref, o_ref, *, block_k: int, sm_scale: float):
@@ -79,7 +104,8 @@ def flash_attention(
         block_q, block_k: tile sizes. 128 aligns with TPU (8, 128) fp32 tiling
             and is a sane Triton default.
         interpret: force Pallas interpret mode. Defaults to True on CPU-only
-            hosts so correctness tests run anywhere.
+            hosts and on pre-Ampere GPUs (Triton needs compute capability
+            8.0+; Colab's free T4 is 7.5) so correctness tests run anywhere.
 
     Returns:
         (batch, heads, seq_q, head_dim), same dtype as q.
@@ -91,7 +117,7 @@ def flash_attention(
     if seq_k % block_k != 0:
         raise ValueError(f"seq_k={seq_k} must be divisible by block_k={block_k}")
     if interpret is None:
-        interpret = jax.default_backend() == "cpu"
+        interpret = _default_interpret()
 
     sm_scale = 1.0 / math.sqrt(head_dim)
     grid = (batch, heads, seq_q // block_q)

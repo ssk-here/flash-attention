@@ -95,6 +95,14 @@ def main() -> None:
     if backend == "cpu":
         print("WARNING: CPU backend — Pallas runs in interpret mode; "
               "timings are for plumbing validation only.")
+    elif backend == "gpu":
+        cc = getattr(jax.devices()[0], "compute_capability", None)
+        if cc is not None and float(cc) < 8.0 and "pallas" in args.impls:
+            print(f"WARNING: GPU compute capability {cc} < 8.0 — Triton "
+                  "cannot compile Pallas kernels here (needs Ampere+).\n"
+                  "Pallas will run in interpret mode: its timings are "
+                  "meaningless. naive/XLA timings remain valid.\n"
+                  "Consider --impls naive xla on this GPU.")
 
     # naive stays un-jitted on purpose (eager dispatch is what it measures).
     # The Pallas path is wrapped in a single jax.jit callable so re-tracing
