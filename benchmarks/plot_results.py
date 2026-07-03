@@ -1,11 +1,13 @@
-"""Plot benchmark results: runtime and throughput vs. sequence length, and a
-roofline chart of achieved TFLOP/s vs. arithmetic intensity.
+"""Plot benchmark results: runtime and throughput vs. sequence length (median
+across repeats, ± standard deviation error bars), and a roofline chart of
+achieved TFLOP/s vs. arithmetic intensity.
 
     python benchmarks/plot_results.py results/results.csv --device L4-bf16-tensor
 """
 
 import argparse
 import csv
+import statistics
 from collections import defaultdict
 from pathlib import Path
 
@@ -41,24 +43,39 @@ def load(path: Path):
     return rows, header_comment
 
 
-def by_impl(rows):
-    d = defaultdict(list)
-    for r in sorted(rows, key=lambda r: r["seq_len"]):
-        d[r["impl"]].append(r)
-    return d
+def aggregate(rows):
+    """-> {impl: [{seq_len, med/std for time_ms and tflops, intensity}]},
+    sorted by seq_len. Repeats collapse to median ± std."""
+    buckets = defaultdict(list)
+    for r in rows:
+        buckets[(r["impl"], r["seq_len"])].append(r)
+    groups = defaultdict(list)
+    for (impl, seq_len), rs in sorted(buckets.items(), key=lambda kv: kv[0][1]):
+        times = [r["time_ms"] for r in rs]
+        tflops = [r["tflops"] for r in rs]
+        groups[impl].append(dict(
+            seq_len=seq_len,
+            time_ms=statistics.median(times),
+            time_ms_std=statistics.stdev(times) if len(times) > 1 else 0.0,
+            tflops=statistics.median(tflops),
+            tflops_std=statistics.stdev(tflops) if len(tflops) > 1 else 0.0,
+            intensity=rs[0]["intensity"],  # shape-determined, identical per repeat
+            n_repeats=len(rs)))
+    return groups
 
 
 def line_plot(groups, ykey, ylabel, title, out):
     fig, ax = plt.subplots(figsize=(7, 5))
     for impl, rows in groups.items():
         color, marker = STYLE.get(impl, ("gray", "x"))
-        ax.plot([r["seq_len"] for r in rows], [r[ykey] for r in rows],
-                color=color, marker=marker, label=impl)
+        ax.errorbar([r["seq_len"] for r in rows], [r[ykey] for r in rows],
+                    yerr=[r[ykey + "_std"] for r in rows],
+                    color=color, marker=marker, capsize=3, label=impl)
     ax.set_xscale("log", base=2)
     ax.set_yscale("log")
     ax.set_xlabel("sequence length")
     ax.set_ylabel(ylabel)
-    ax.set_title(title)
+    ax.set_title(title, fontsize=9)
     ax.grid(True, which="both", alpha=0.3)
     ax.legend()
     fig.tight_layout()
@@ -78,8 +95,9 @@ def roofline_plot(groups, device, out):
                 fontsize=8, color="gray")
     for impl, rows in groups.items():
         color, marker = STYLE.get(impl, ("gray", "x"))
-        ax.scatter([r["intensity"] for r in rows], [r["tflops"] for r in rows],
-                   color=color, marker=marker, label=impl, zorder=3)
+        ax.errorbar([r["intensity"] for r in rows], [r["tflops"] for r in rows],
+                    yerr=[r["tflops_std"] for r in rows],
+                    fmt=marker, color=color, capsize=3, label=impl, zorder=3)
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("arithmetic intensity (FLOPs / HBM byte)")
@@ -105,12 +123,12 @@ def main():
         raise SystemExit("no successful rows in CSV")
     out_dir = args.out_dir or args.csv_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
-    groups = by_impl(rows)
+    groups = aggregate(rows)
 
     line_plot(groups, "time_ms", "median time (ms)",
-              f"Attention runtime — {meta}", out_dir / "runtime_vs_seqlen.png")
+              f"Attention runtime\n{meta}", out_dir / "runtime_vs_seqlen.png")
     line_plot(groups, "tflops", "achieved TFLOP/s",
-              f"Attention throughput — {meta}", out_dir / "throughput_vs_seqlen.png")
+              f"Attention throughput\n{meta}", out_dir / "throughput_vs_seqlen.png")
     roofline_plot(groups, args.device, out_dir / "roofline.png")
 
 

@@ -72,13 +72,17 @@ Or locally / in a terminal:
 pip install -e .
 python -m pytest tests -q                                   # correctness first
 python benchmarks/run_benchmark.py --seq-lens 512 1024 2048 4096 \
-    --dtype bf16 --output results/results.csv
+    --dtype bf16 --repeats 10 --seed 0 --output results/results.csv
 python benchmarks/plot_results.py results/results.csv --device L4-bf16-tensor
 ```
 
 ## Benchmark methodology
 
-- Warmup iterations to exclude compilation, then median of timed runs with
+- Each configuration is measured over `--repeats` independent random data draws
+  (default 10, seeded: repeat *r* uses `PRNGKey(seed + r)`, so runs are exactly
+  reproducible). Within a repeat all three implementations see the same tensors.
+  Plots show median across repeats with ±1σ error bars.
+- Per draw: warmup iterations to exclude compilation, then median of timed runs with
   `jax.block_until_ready` (JAX dispatch is async — forgetting this measures nothing).
 - FLOPs counted analytically: `4·B·H·N²·d`.
 - HBM bytes estimated analytically per implementation (naive pays ~4·B·H·N² elements of
