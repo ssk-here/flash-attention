@@ -1,0 +1,100 @@
+HloModule jit_naive_attention, is_scheduled=true, entry_computation_layout={(f32[1,2,512,64]{3,2,1,0}, f32[1,2,512,64]{3,2,1,0}, f32[1,2,512,64]{3,2,1,0})->f32[1,2,512,64]{3,2,1,0}}, allow_spmd_sharding_propagation_to_parameters={true,true,true}, allow_spmd_sharding_propagation_to_output={true}
+
+FileNames
+1 "C:\\Users\\ssk95\\MachineLearning\\Projects\\pallas-flash-attention\\benchmarks\\dump_hlo.py"
+2 "C:\\Users\\ssk95\\MachineLearning\\Projects\\pallas-flash-attention\\flash_attention\\naive.py"
+
+FunctionNames
+1 "<module>"
+2 "main"
+3 "analyze"
+4 "naive_attention"
+
+FileLocations
+1 {file_name_id=1 function_name_id=1 line=110 end_line=110 column=4 end_column=10}
+2 {file_name_id=1 function_name_id=2 line=90 end_line=90 column=12 end_column=75}
+3 {file_name_id=1 function_name_id=3 line=47 end_line=47 column=14 end_column=62}
+4 {file_name_id=2 function_name_id=4 line=28 end_line=28 column=12 end_column=43}
+5 {file_name_id=2 function_name_id=4 line=27 end_line=27 column=13 end_column=56}
+6 {file_name_id=2 function_name_id=4 line=29 end_line=29 column=11 end_column=50}
+
+StackFrames
+1 {file_location_id=1 parent_frame_id=1}
+2 {file_location_id=2 parent_frame_id=2}
+3 {file_location_id=3 parent_frame_id=3}
+4 {file_location_id=4 parent_frame_id=4}
+5 {file_location_id=5 parent_frame_id=4}
+6 {file_location_id=6 parent_frame_id=4}
+
+
+%fused_computation (param_0: f32[2,512,512], param_1: f32[2,512,64]) -> f32[2,512,64] {
+  %param_0 = f32[2,512,512]{2,1,0} parameter(0)
+  %param_1 = f32[2,512,64]{2,1,0} parameter(1)
+  ROOT %dot.2 = f32[2,512,64]{2,1,0} dot(%param_0, %param_1), lhs_batch_dims={0}, lhs_contracting_dims={2}, rhs_batch_dims={0}, rhs_contracting_dims={1}
+}
+
+%region_1.2 (reduce_sum.3: f32[], reduce_sum.4: f32[]) -> f32[] {
+  %reduce_sum.3 = f32[] parameter(0), metadata={op_name="reduce_sum"}
+  %reduce_sum.4 = f32[] parameter(1), metadata={op_name="reduce_sum"}
+  ROOT %reduce_sum.5 = f32[] add(%reduce_sum.3, %reduce_sum.4), metadata={op_name="jit(naive_attention)/reduce_sum" stack_frame_id=4}
+}
+
+%fused_computation.1 (param_0.1: f32[1,2,512,512]) -> f32[1,2,512] {
+  %param_0.1 = f32[1,2,512,512]{3,2,1,0} parameter(0)
+  %constant.1 = f32[] constant(0)
+  ROOT %reduce_sum.0 = f32[1,2,512]{2,1,0} reduce(%param_0.1, %constant.1), dimensions={3}, to_apply=%region_1.2, metadata={op_name="jit(naive_attention)/reduce_sum" stack_frame_id=4}
+}
+
+%region_0.1 (reduce_max.3: f32[], reduce_max.4: f32[]) -> f32[] {
+  %reduce_max.3 = f32[] parameter(0), metadata={op_name="reduce_max"}
+  %reduce_max.4 = f32[] parameter(1), metadata={op_name="reduce_max"}
+  ROOT %reduce_max.5 = f32[] maximum(%reduce_max.3, %reduce_max.4), metadata={op_name="jit(naive_attention)/reduce_max" stack_frame_id=4}
+}
+
+%fused_computation.2 (param_0.9: f32[1,2,512,64], param_1.8: f32[1,2,512,64]) -> f32[1,2,512,512] {
+  %param_0.9 = f32[1,2,512,64]{3,2,1,0} parameter(0)
+  %bitcast.10 = f32[2,512,64]{2,1,0} bitcast(%param_0.9), metadata={op_name="q"}
+  %param_1.8 = f32[1,2,512,64]{3,2,1,0} parameter(1)
+  %bitcast.11 = f32[2,512,64]{2,1,0} bitcast(%param_1.8), metadata={op_name="k"}
+  %dot.3 = f32[2,512,512]{2,1,0} dot(%bitcast.10, %bitcast.11), lhs_batch_dims={0}, lhs_contracting_dims={2}, rhs_batch_dims={0}, rhs_contracting_dims={2}
+  %constant.3 = f32[] constant(0.125)
+  %broadcast.8 = f32[2,512,512]{2,1,0} broadcast(%constant.3), dimensions={}, metadata={op_name="jit(naive_attention)/mul" stack_frame_id=5}
+  %mul.1 = f32[2,512,512]{2,1,0} multiply(%dot.3, %broadcast.8), metadata={op_name="jit(naive_attention)/mul" stack_frame_id=5}
+  %bitcast.9 = f32[1,2,512,512]{3,2,1,0} bitcast(%mul.1), metadata={op_name="jit(naive_attention)/mul" stack_frame_id=5}
+  %constant.2 = f32[] constant(-inf)
+  %reduce_max.0 = f32[1,2,512]{2,1,0} reduce(%bitcast.9, %constant.2), dimensions={3}, to_apply=%region_0.1, metadata={op_name="jit(naive_attention)/reduce_max" stack_frame_id=4}
+  %bitcast.8 = f32[2,512]{1,0} bitcast(%reduce_max.0), metadata={op_name="jit(naive_attention)/reduce_max" stack_frame_id=4}
+  %sub.0 = f32[1,2,512,512]{3,2,1,0} broadcast(%bitcast.8), dimensions={1,2}, metadata={op_name="jit(naive_attention)/sub" stack_frame_id=4}
+  %sub.1 = f32[1,2,512,512]{3,2,1,0} subtract(%bitcast.9, %sub.0), metadata={op_name="jit(naive_attention)/sub" stack_frame_id=4}
+  ROOT %exp.0 = f32[1,2,512,512]{3,2,1,0} exponential(%sub.1), metadata={op_name="jit(naive_attention)/exp" stack_frame_id=4}
+}
+
+%fused_computation.3 (param_0.11: f32[1,2,512,512], param_1.11: f32[1,2,512]) -> f32[2,512,512] {
+  %param_0.11 = f32[1,2,512,512]{3,2,1,0} parameter(0)
+  %param_1.11 = f32[1,2,512]{2,1,0} parameter(1)
+  %bitcast.13 = f32[2,512]{1,0} bitcast(%param_1.11), metadata={op_name="jit(naive_attention)/div" stack_frame_id=4}
+  %broadcast.9 = f32[1,2,512,512]{3,2,1,0} broadcast(%bitcast.13), dimensions={1,2}, metadata={op_name="jit(naive_attention)/div" stack_frame_id=4}
+  %multiply.1 = f32[1,2,512,512]{3,2,1,0} multiply(%param_0.11, %broadcast.9), metadata={op_name="jit(naive_attention)/div" stack_frame_id=4}
+  ROOT %bitcast.12 = f32[2,512,512]{2,1,0} bitcast(%multiply.1), metadata={op_name="jit(naive_attention)/div" stack_frame_id=4}
+}
+
+%fused_computation.4 (param_0.13: f32[1,2,512]) -> f32[1,2,512] {
+  %constant.8 = f32[] constant(1), metadata={op_name="jit(naive_attention)/div" stack_frame_id=4}
+  %broadcast.10 = f32[1,2,512]{2,1,0} broadcast(%constant.8), dimensions={}, metadata={op_name="jit(naive_attention)/div" stack_frame_id=4}
+  %param_0.13 = f32[1,2,512]{2,1,0} parameter(0)
+  ROOT %divide.2 = f32[1,2,512]{2,1,0} divide(%broadcast.10, %param_0.13), metadata={op_name="jit(naive_attention)/div" stack_frame_id=4}
+}
+
+ENTRY %main.3 (q.1: f32[1,2,512,64], k.1: f32[1,2,512,64], v.1: f32[1,2,512,64]) -> f32[1,2,512,64] {
+  %q.1 = f32[1,2,512,64]{3,2,1,0} parameter(0), metadata={op_name="q"}
+  %k.1 = f32[1,2,512,64]{3,2,1,0} parameter(1), metadata={op_name="k"}
+  %v.1 = f32[1,2,512,64]{3,2,1,0} parameter(2), metadata={op_name="v"}
+  %ynn_fusion.2 = f32[1,2,512,512]{3,2,1,0} fusion(%q.1, %k.1), kind=kCustom, calls=%fused_computation.2, metadata={op_name="jit(naive_attention)/reduce_max" stack_frame_id=4}, backend_config={"fusion_config":{"kind":"__ynn_fusion"},"outer_dimension_partitions":[]}
+  %bitcast.6 = f32[2,512,64]{2,1,0} bitcast(%v.1), metadata={op_name="v"}
+  %ynn_fusion.1 = f32[1,2,512]{2,1,0} fusion(%ynn_fusion.2), kind=kCustom, calls=%fused_computation.1, metadata={op_name="jit(naive_attention)/reduce_sum" stack_frame_id=4}, backend_config={"fusion_config":{"kind":"__ynn_fusion"},"outer_dimension_partitions":[]}
+  %broadcast_divide_fusion = f32[1,2,512]{2,1,0} fusion(%ynn_fusion.1), kind=kLoop, calls=%fused_computation.4, metadata={op_name="jit(naive_attention)/div" stack_frame_id=4}
+  %multiply_bitcast_fusion = f32[2,512,512]{2,1,0} fusion(%ynn_fusion.2, %broadcast_divide_fusion), kind=kLoop, calls=%fused_computation.3, metadata={op_name="jit(naive_attention)/div" stack_frame_id=4}, backend_config={"outer_dimension_partitions":["2","2"]}
+  %ynn_fusion = f32[2,512,64]{2,1,0} fusion(%multiply_bitcast_fusion, %bitcast.6), kind=kCustom, calls=%fused_computation, backend_config={"fusion_config":{"kind":"__ynn_fusion"},"outer_dimension_partitions":[]}
+  ROOT %bitcast.7 = f32[1,2,512,64]{3,2,1,0} bitcast(%ynn_fusion), metadata={op_name="jit(naive_attention)/bhqk,bhkd->bhqd/dot_general" stack_frame_id=6}
+}
+

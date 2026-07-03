@@ -53,6 +53,9 @@ tests/
 benchmarks/
   run_benchmark.py   # sweeps sequence lengths, writes CSV (time, TFLOP/s, intensity)
   plot_results.py    # runtime / throughput / roofline plots from the CSV
+  dump_hlo.py        # dump optimized XLA HLO; count fusions / N² buffers / temp memory
+analysis/
+  numerical_drift.py # fp32/bf16 error scaling vs float64 reference, per implementation
 notebooks/
   colab_runner.ipynb # clone → install → test → benchmark → plot, on Colab
 ```
@@ -93,6 +96,74 @@ python benchmarks/plot_results.py results/results.csv --device L4-bf16-tensor
   score-matrix traffic; flash pays only Q/K/V/O).
 - Roofline: achieved TFLOP/s vs. arithmetic intensity, against published peaks
   (NVIDIA L4: 121 TF bf16 tensor / 300 GB/s; TPU v5e: 197 TF bf16 / 819 GB/s).
+
+## Reading the compiler: where XLA fusion stops
+
+The claim "XLA fuses elementwise ops but materializes the N² matrices" should
+not be taken on faith — [benchmarks/dump_hlo.py](benchmarks/dump_hlo.py)
+dumps the fully optimized HLO for the jitted naive attention and counts the
+structural evidence (full dumps in [results/hlo/](results/hlo/)):
+
+| N | `dot` ops | fusion computations | values typed `…,N,N]` | XLA temp memory | analytic 2·B·H·N²·4 |
+|---:|---:|---:|---:|---:|---:|
+| 256  | 2 | 5 | 15 | 1.05 MB  | 1.05 MB  |
+| 512  | 2 | 5 | 15 | 4.19 MB  | 4.19 MB  |
+| 1024 | 2 | 5 | 15 | 16.78 MB | 16.78 MB |
+
+Reading the dump for N=256 (B=1, H=2, d=64, CPU backend):
+
+- XLA's automatic fusion works well *within* the elementwise region: the
+  scale, `reduce_max`, subtract, `exponential`, `reduce_sum` and divide all
+  land inside a handful of `fusion(...)` computations.
+- But every fusion region is bounded by a `dot(` op. The score matrix
+  (`f32[1,2,256,256] dot(...)`) and the probability matrix
+  (`f32[1,2,256,256] exponential(...)`) exist as whole values *between*
+  kernels — that's the HBM round-trip.
+- XLA's own `memory_analysis().temp_size_in_bytes` matches the analytic
+  score+probability footprint **exactly**, at every size: temp memory is
+  precisely two N² fp32 buffers, quadrupling when N doubles.
+
+The Pallas kernel, by contrast, lowers to a single kernel whose only large
+operands are the O(N·d) inputs and outputs. XLA *cannot* make this
+transformation automatically: fusing across a `dot` requires restructuring
+the softmax into the online recurrence — an algebraic rewrite, not a local
+graph optimization. That is precisely the gap between an auto-fusing
+compiler and a hand-written kernel, stated in the compiler's own IR.
+
+## Numerical drift of the online softmax
+
+The online-softmax recurrence is algebraically exact, but in floating point
+it does extra work (a rescale `exp(m_old − m_new)` per K/V block), so it has
+a different rounding profile than plain softmax. Correctness tests check one
+size at one tolerance; [analysis/numerical_drift.py](analysis/numerical_drift.py)
+measures how error *scales* with N against a float64 reference (mean of 3
+seeded draws; plot in [results/numerical-drift/](results/numerical-drift/)):
+
+| N | naive f32 | pallas f32 | naive bf16 | pallas bf16 |
+|---:|---:|---:|---:|---:|
+| 128  | 5.5e-07 | 5.8e-07 | 6.8e-03 | 3.8e-03 |
+| 1024 | 3.0e-07 | 2.0e-07 | 4.0e-03 | 2.0e-03 |
+| 4096 | 1.7e-07 | 1.4e-07 | 1.6e-03 | 9.3e-04 |
+
+*(max elementwise |error| vs. f64)*
+
+Three findings:
+
+1. **The online recurrence does not accumulate extra error.** The Pallas
+   f32 curve tracks — in fact slightly beats — plain softmax at every N.
+   The block-wise rescaling is benign: each rescale factor is ≤ 1 and the
+   running max only ratchets upward, so the recurrence never amplifies
+   earlier rounding.
+2. **In-kernel fp32 accumulators halve bf16 error.** With bf16 inputs, the
+   Pallas kernel (which accumulates QKᵀ and PV in fp32 via
+   `preferred_element_type`) is consistently ~2× more accurate than naive
+   attention executed in bf16 end-to-end — the mixed-precision design point
+   production kernels use, quantified.
+3. **Error *decreases* with N** for every variant. With more keys, softmax
+   mass spreads thinner, and the output — a convex combination of N value
+   vectors — averages over more terms, so elementwise rounding noise
+   partially cancels. Attention outputs get numerically *easier* with
+   context length even as they get computationally harder.
 
 ## Results
 
